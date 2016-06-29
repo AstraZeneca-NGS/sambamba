@@ -38,6 +38,7 @@ import std.array;
 import std.getopt;
 import std.parallelism;
 import std.typecons;
+import std.math;
 
 version(standalone) {
     int main(string[] args) {
@@ -606,25 +607,25 @@ final class PerSampleRegionData {
     this(size_t n_coverage_counters, size_t n_regions) {
         coverage_counters_ = new uint[][](n_coverage_counters, n_regions);
         n_reads_.length = n_regions;
-        n_bases_.length = n_regions;
+        bases_ = new uint[][](n_regions);
     }
 
     // for each coverage threshold, we hold here numbers of bases with
     // cov. >= that threshold, for each region
     private uint[][] coverage_counters_;
     private uint[] n_reads_; // for each region
-    private uint[] n_bases_; // ditto
+    private uint[][] bases_; // ditto
 
     ref uint coverage_count(size_t cov_id, size_t region_id) {
         return coverage_counters_[cov_id][region_id];
     }
 
     ref uint n_reads(size_t id) { return n_reads_[id]; }
-    ref uint n_bases(size_t id) { return n_bases_[id]; }
+    ref uint[] bases(size_t id) { return bases_[id]; }
 
     void reset(size_t id) {
         n_reads_[id] = 0;
-        n_bases_[id] = 0;
+        bases_[id] = [];
         foreach (ref cov_counter; coverage_counters_)
             cov_counter[id] = 0;
     }
@@ -642,7 +643,7 @@ abstract class PerRegionPrinter : ColumnPrinter {
             output_file.write(field, "\t");
         foreach (k; 3 .. n_before)
             output_file.write("F", k, "\t");
-        output_file.write("readCount\tmeanCoverage");
+        output_file.write("readCount\tminDepth\tmeanCoverage\tstdDev");
         foreach (cov; cov_thresholds)
             output_file.write("\tpercentage", cov);
         if (!combined)
@@ -657,7 +658,7 @@ abstract class PerRegionPrinter : ColumnPrinter {
     private void countRead(R)(auto ref R read, size_t id) {
         auto n = countOverlappingBases(read, id);
         auto data = getSampleData(getSampleId(read));
-        data.n_bases(id) += n;
+        // data.n_bases(id) += n;
 
         // count the read only if at least one base is good
         if (n > 0)
@@ -728,7 +729,7 @@ abstract class PerRegionPrinter : ColumnPrinter {
 
         auto data = getSampleData(r1.sample_id);
 
-        data.n_bases(id) -= n1 + n2; // this count is then dealt with on per-base basis
+        // data.n_bases(id) -= n1 + n2; // this count is then dealt with on per-base basis
 
         data.n_reads(id) -= (n1_full > 0) + (n2_full > 0);
         data.n_reads(id) += (n1_full + n2_full > 0); // count only one read instead of two
@@ -766,7 +767,7 @@ abstract class PerRegionPrinter : ColumnPrinter {
                 return;
             auto sample_id = getSampleId(read);
             auto data = getSampleData(sample_id);
-            data.n_bases(region_id) += 1;
+            // data.n_bases(region_id) += 1;
             cov_per_sample[sample_id] += 1;
         }
 
@@ -828,6 +829,7 @@ abstract class PerRegionPrinter : ColumnPrinter {
 
                 foreach (sample_id; iota(cov_per_sample.length.to!uint)) {
                     auto data = getSampleData(sample_id);
+                    data.bases(id) ~= cov_per_sample[sample_id];
                     foreach (i, threshold; cov_thresholds)
                         if (cov_per_sample[sample_id] >= threshold)
                             data.coverage_count(i, id) += 1;
@@ -842,15 +844,29 @@ abstract class PerRegionPrinter : ColumnPrinter {
         auto region = getRegionById(id);
         auto length = region.end - region.start;
         with(output_file) {
-            auto mean_cov = data.n_bases(id).to!float / length;
+            auto sum_depth = 0.0;
+            uint min_depth;
+
+            foreach (depth; data.bases(id)) {
+                sum_depth += depth;
+                min_depth = min_depth ? min(min_depth, depth) : depth;
+            }
+            min_depth = min_depth ? min_depth : 0;
+            auto mean_cov = sum_depth / length;
 
             bool ok = mean_cov >= this.min_cov && mean_cov <= this.max_cov;
 
             if (!ok && !this.annotate)
                 return;
 
+            float sum_var = 0.0;
+            foreach (depth; data.bases(id)) {
+                sum_var += (depth - mean_cov) * (depth - mean_cov);
+            }
+            auto std_dev = sqrt(sum_var / length);
             writeOriginalBedLine(id);
-            write(data.n_reads(id), '\t', mean_cov);
+            write(data.n_reads(id), '\t', min_depth, '\t', mean_cov, '\t', std_dev);
+
             foreach (j; 0 .. cov_thresholds.length) {
                 auto percentage = data.coverage_count(j, id).to!float * 100 / length;
                 if (cov_thresholds[j] == 0)
