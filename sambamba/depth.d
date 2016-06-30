@@ -643,7 +643,7 @@ abstract class PerRegionPrinter : ColumnPrinter {
             output_file.write(field, "\t");
         foreach (k; 3 .. n_before)
             output_file.write("F", k, "\t");
-        output_file.write("readCount\tminDepth\tmeanCoverage\tstdDev");
+        output_file.write("readCount\tminDepth\tmedianCoverage\tmeanCoverage\tstdDev\tW/n 20% of median depth");
         foreach (cov; cov_thresholds)
             output_file.write("\tpercentage", cov);
         if (!combined)
@@ -844,20 +844,29 @@ abstract class PerRegionPrinter : ColumnPrinter {
         auto region = getRegionById(id);
         auto length = region.end - region.start;
         with(output_file) {
-            auto sum_depth = 0.0;
-            uint min_depth;
-
-            foreach (depth; data.bases(id)) {
-                sum_depth += depth;
-                min_depth = min_depth ? min(min_depth, depth) : depth;
-            }
-            min_depth = min_depth ? min_depth : 0;
-            auto mean_cov = sum_depth / length;
+            sort(data.bases(id));
+            auto min_depth = data.bases(id) ? data.bases(id)[0] : 0;
+            auto mean_cov = sum(data.bases(id)) * 1.0 / length;
 
             bool ok = mean_cov >= this.min_cov && mean_cov <= this.max_cov;
 
             if (!ok && !this.annotate)
                 return;
+
+            uint median_cov = 0;
+            float wn_20_percent = 0;
+            auto num_bases = data.bases(id).length;
+            if (num_bases > 0) {
+                if (fmod(num_bases, 2) == 1) {
+                    median_cov = data.bases(id)[(num_bases - 1) / 2];
+                }
+                else {
+                    median_cov = (data.bases(id)[num_bases / 2] + data.bases(id)[(num_bases / 2) - 1]) / 2;
+                }
+
+                auto bases_within_normal = array(data.bases(id).filter!(depth => fabs(median_cov - depth) < 0.2 * median_cov));
+                wn_20_percent = bases_within_normal.length * 100.0 / num_bases;
+            }
 
             float sum_var = 0.0;
             foreach (depth; data.bases(id)) {
@@ -865,7 +874,7 @@ abstract class PerRegionPrinter : ColumnPrinter {
             }
             auto std_dev = sqrt(sum_var / length);
             writeOriginalBedLine(id);
-            write(data.n_reads(id), '\t', min_depth, '\t', mean_cov, '\t', std_dev);
+            write(data.n_reads(id), '\t', min_depth, '\t', median_cov, '\t', mean_cov, '\t', std_dev, '\t', wn_20_percent);
 
             foreach (j; 0 .. cov_thresholds.length) {
                 auto percentage = data.coverage_count(j, id).to!float * 100 / length;
