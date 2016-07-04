@@ -643,7 +643,7 @@ abstract class PerRegionPrinter : ColumnPrinter {
             output_file.write(field, "\t");
         foreach (k; 3 .. n_before)
             output_file.write("F", k, "\t");
-        output_file.write("readCount\tminDepth\tmedianCoverage\tmeanCoverage\tstdDev\tW/n 20% of median depth");
+        output_file.write("readCount\tminDepth\tmedianCoverage\tmeanCoverage\tstdDev\tpercentWithin20PercentOfMedian");
         foreach (cov; cov_thresholds)
             output_file.write("\tpercentage", cov);
         if (!combined)
@@ -854,7 +854,7 @@ abstract class PerRegionPrinter : ColumnPrinter {
                 return;
 
             uint median_cov = 0;
-            float wn_20_percent = 0;
+            double wn_20_percent = .0;
             auto num_bases = data.bases(id).length;
             if (num_bases > 0) {
                 if (fmod(num_bases, 2) == 1) {
@@ -864,8 +864,13 @@ abstract class PerRegionPrinter : ColumnPrinter {
                     median_cov = (data.bases(id)[num_bases / 2] + data.bases(id)[(num_bases / 2) - 1]) / 2;
                 }
 
-                auto bases_within_normal = array(data.bases(id).filter!(depth => fabs(median_cov - depth) < 0.2 * median_cov));
-                wn_20_percent = bases_within_normal.length * 100.0 / num_bases;
+                uint num_bases_within_normal = 0;
+                foreach (depth; data.bases(id)) {
+                    if (abs(median_cov - depth) < 0.2 * median_cov) {
+                        num_bases_within_normal++;
+                    }
+                }
+                wn_20_percent = num_bases_within_normal * 100.0 / num_bases;
             }
 
             float sum_var = 0.0;
