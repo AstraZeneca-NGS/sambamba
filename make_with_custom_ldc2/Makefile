@@ -1,19 +1,22 @@
 D_COMPILER=dmd
 D_FLAGS=--compiler=dmd -IBioD -g -d#-O -release -inline # -version=serial
 
-STATIC_LIB_PATH=-Lhtslib -Llz4/lib
+UNAME_S := $(shell uname -s)
+ifeq ($(UNAME_S),Darwin)
+	LDC2_DIR=ldc2-1.0.0-osx-x86_64
+	LINK_CMD=gcc -dead_strip -lphobos2-ldc -ldruntime-ldc -lm -lpthread htslib/libhts.a lz4/lib/liblz4.a build/sambamba.o -o build/sambamba
+	DMD_STATIC_LIBS=htslib/libhts.a lz4/lib/liblz4.a
+else
+	LDC2_DIR=ldc2-1.0.0-linux-x86_64
+	LINK_CMD=gcc -Wl,--gc-sections -o build/sambamba build/sambamba.o $(STATIC_LIB_SUBCMD) -l:libphobos2-ldc.a -l:libdruntime-ldc.a  -lrt -lpthread -lm
+	DMD_STATIC_LIBS=-L-Lhtslib -L-l:libhts.a -L-l:libphobos2.a -L-Llz4/lib -L-l:liblz4.a
+endif
+
+STATIC_LIB_PATH=-Lhtslib -Llz4/lib -L${LDC2_DIR}/lib
 STATIC_LIB_SUBCMD=$(STATIC_LIB_PATH) -Wl,-Bstatic -lhts -llz4 -Wl,-Bdynamic
 RDMD_FLAGS=--force --build-only --compiler=$(D_COMPILER) $(D_FLAGS)
 
 PLATFORM := $(shell uname -s)
-
-ifeq "$(PLATFORM)" "Darwin"
-LINK_CMD=gcc -dead_strip -lphobos2-ldc -ldruntime-ldc -lm -lpthread htslib/libhts.a lz4/lib/liblz4.a build/sambamba.o -o build/sambamba
-DMD_STATIC_LIBS=htslib/libhts.a lz4/lib/liblz4.a
-else
-LINK_CMD=gcc -Wl,--gc-sections -o build/sambamba build/sambamba.o $(STATIC_LIB_SUBCMD) -l:libphobos2-ldc.a -l:libdruntime-ldc.a  -lrt -lpthread -lm
-DMD_STATIC_LIBS=-L-Lhtslib -L-l:libhts.a -L-l:libphobos2.a -L-Llz4/lib -L-l:liblz4.a
-endif
 
 # DMD only - this goal is used because of fast compilation speed, during development
 all: htslib-static lz4-static
@@ -23,13 +26,13 @@ all: htslib-static lz4-static
 # This is the main Makefile goal, used for building releases (best performance)
 sambamba-ldmd2-64: htslib-static lz4-static
 	mkdir -p build/
-	ldmd2 @sambamba-ldmd-release.rsp
+	${LDC2_DIR}/bin/ldmd2 @sambamba-ldmd-release.rsp
 	$(LINK_CMD)
 
 # For debugging; GDB & Valgrind are more friendly to executables created using LDC/GDC than DMD
 sambamba-ldmd2-debug: htslib-static lz4-static
 	mkdir -p build/
-	ldmd2 @sambamba-ldmd-debug.rsp
+	${LDC2_DIR}/bin/ldmd2 @sambamba-ldmd-debug.rsp
 	$(LINK_CMD)
 
 htslib-static:
@@ -81,4 +84,4 @@ sambamba-pileup:
 .PHONY: clean
 
 clean:
-	rm -rf build/ ; $(MAKE) -C htslib clean ; $(MAKE) -C lz4 clean
+	rm -rf build/ ; cd htslib ; make clean
