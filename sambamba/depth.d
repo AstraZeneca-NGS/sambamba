@@ -943,7 +943,7 @@ final class PerBedRegionPrinter : PerRegionPrinter {
         else
             stats_collector = new GeneralRegionStatsCollector(raw_bed);
 
-        printBedHeader(raw_bed_lines[0].split().length);
+        printBedHeader(raw_bed_lines[0].split("\t").length);
     }
 
     override void close() {
